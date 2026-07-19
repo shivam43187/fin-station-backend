@@ -1,0 +1,113 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# IDEs
+.vscode/
+.idea/
+
+# Python testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Type checkers
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Logs
+*.log
+logs/
+
+# SQLite databases
+*.db
+*.sqlite3
+
+# FastAPI
+instance/
+
+# Uvicorn
+uvicorn.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# pyenv
+.python-version
+
+# PDM
+.pdm-python
+.pdm-build/
+
+# Poetry
+poetry.lock
+
+# Pipenv
+Pipfile.lock
+
+# Hatch
+.hatch/
+
+# Coverage reports
+coverage.xml
+*.cover
+
+# Static files (if generated)
+staticfiles/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Secrets
+*.pem
+*.key
+
+# Local configuration
+config.local.py
+
+# Misc
+*.swp
+*.swo
