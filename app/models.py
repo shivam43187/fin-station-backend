@@ -27,16 +27,17 @@ class User(Base):
     # [cite: 61]
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
+    phone_number = Column(String, unique=True, nullable=True)
     full_name = Column(String)
     auth_provider = Column(String, default="email")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     is_active = Column(Boolean, default=True)
 
     # Relationships
-    subscriptions = relationship("Subscription", back_populates="user")
-    usage = relationship("UserUsage", back_populates="user")
-    watchlists = relationship("Watchlist", back_populates="user")
-    reports_history = relationship("AIReportHistory", back_populates="user")
+    subscriptions = relationship("Subscription", back_populates="user", cascade="all, delete-orphan")
+    usage = relationship("UserUsage", back_populates="user", cascade="all, delete-orphan")
+    watchlists = relationship("Watchlist", back_populates="user", cascade="all, delete-orphan")
+    reports_history = relationship("AIReportHistory", back_populates="user", cascade="all, delete-orphan")
 
 
 class Subscription(Base):
@@ -73,8 +74,8 @@ class Watchlist(Base):
 
     # [cite: 64]
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    stock_symbol = Column(String, nullable=False) # e.g., 'RELIANCE'
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE")) 
+    stock_symbol = Column(String, nullable=False)
     added_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", back_populates="watchlists")
@@ -82,6 +83,14 @@ class Watchlist(Base):
     # Ensures a user can't add the same stock twice [cite: 64]
     __table_args__ = (UniqueConstraint('user_id', 'stock_symbol', name='_user_stock_uc'),)
 
+class PriceAlert(Base):
+    __tablename__ = "price_alerts"
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, index=True)
+    symbol = Column(String)
+    target_price = Column(Float)
+    condition = Column(String) # "ABOVE" or "BELOW"
+    is_active = Column(Boolean, default=True)
 
 class AIReportHistory(Base):
     __tablename__ = "ai_reports_history"

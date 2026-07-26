@@ -6,7 +6,9 @@ from typing import Optional
 # --- USER SCHEMAS ---
 class UserBase(BaseModel):
     email: EmailStr
-    full_name: Optional[str] = None
+    full_name: str
+    auth_provider: str
+    phone_number: str
 
 class UserCreate(UserBase):
     auth_provider: str = "email"
@@ -17,7 +19,7 @@ class UserResponse(UserBase):
     is_active: bool
 
     class Config:
-        from_attributes = True  # Pydantic v2 config (SQLAlchemy models ko JSON mein convert karne ke liye)
+        from_attributes = True  # (orm_mode in older Pydantic)
 
 # --- WATCHLIST SCHEMAS ---
 class WatchlistCreate(BaseModel):
