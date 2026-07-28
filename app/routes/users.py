@@ -3,6 +3,9 @@ from sqlalchemy.orm import Session
 from fastapi import APIRouter, HTTPException, Query, Depends
 from .. import models, schemas
 from ..database import get_db
+import logging
+
+logger = logging.getLogger("users")
 
 # Router setup
 router = APIRouter(
@@ -13,25 +16,39 @@ router = APIRouter(
 # 1. Create User Endpoint (Tumhara existing code)
 @router.post("/", response_model=schemas.UserResponse)
 def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    existing_user = db.query(models.User).filter(
-        (models.User.email == user.email) | (models.User.phone_number == user.phone_number)
-    ).first()
+    try:
+        # 1. Check karo ki email/phone pehle se exist toh nahi karta
+        existing_user = db.query(models.User).filter(
+            (models.User.email == user.email) | (models.User.phone_number == user.phone_number)
+        ).first()
 
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Account with this Email or Phone Number already exists")
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Account with this Email or Phone Number already exists")
 
-    new_user = models.User(
-        email=user.email, 
-        full_name=user.full_name, 
-        auth_provider=user.auth_provider,
-        phone_number=user.phone_number
-    )
-    
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    
-    return new_user
+        # 2. Agar naya user hai, toh database model banao
+        new_user = models.User(
+            email=user.email, 
+            full_name=user.full_name, 
+            auth_provider=user.auth_provider,
+            phone_number=user.phone_number
+        )
+        
+        # 3. Database mein save karo
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user) # ID aur created_at fetch karne ke liye
+        
+        # 4. Return new user (FastAPI automatically isko JSON mein convert kar dega)
+        return new_user
+
+    except HTTPException:
+        # Custom HTTP exceptions (jaise 400 wala) ko as-is throw hone do
+        raise
+    except Exception as e:
+        # Agar Database commit fail ho jaye (jaise DB down ho ya constraint error ho)
+        db.rollback() 
+        logger.error(f"Error creating user: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error while creating user account")
 
 # 2. NAYA: Get User Profile Endpoint
 @router.get("/profile", response_model=schemas.UserResponse)

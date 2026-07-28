@@ -5,6 +5,7 @@ from app.routes import users
 from app.routes import watchlist 
 from app.routes import subscriptions
 from app.routes import market
+from app.routes import ai_reports
 from app.routes import market, screener
 
 app = FastAPI(
@@ -40,6 +41,7 @@ app.include_router(watchlist.router)
 app.include_router(subscriptions.router)
 app.include_router(market.router)
 app.include_router(screener.router)
+app.include_router(ai_reports.router)
 
 @app.get("/")
 def read_root():
