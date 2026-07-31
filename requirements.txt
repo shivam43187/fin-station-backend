@@ -11,3 +11,4 @@ razorpay
 psycopg2-binary
 pydantic[email]
 jwt
+PyJWT>=2.0.0
