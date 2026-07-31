@@ -73,18 +73,18 @@ def get_live_index(ticker_symbol: str):
 async def fetch_nse_market_breadth():
     url = "https://www.nseindia.com/api/allIndices"
     
-    headers = {
-        "Accept": "application/json, text/plain, */*",
-    }
-    
     async with httpx.AsyncClient() as client:
         try:
-            # Session establish karne ke liye homepage hit karna zaroori hai
-            await client.get("https://www.nseindia.com", headers=headers, timeout=10.0)
+            # # Session establish karne ke liye homepage hit karna zaroori hai
+            # await client.get("https://www.nseindia.com", headers=headers, timeout=10.0)
             
             # API Hit
-            response = await client.get(url, headers=headers, timeout=10.0)
-            
+            response = await client.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9"
+            }, timeout=10.0)
+            logger.info(f"NSE Breadth API response status: {response.status_code}")
             if response.status_code == 200:
                 data = response.json()
                 
@@ -95,10 +95,10 @@ async def fetch_nse_market_breadth():
                     "unchanged": data.get("unchanged", 0)
                 }
             else:
-                print(f"NSE Breadth API returned {response.status_code}")
+                logger.error(f"NSE Breadth API returned {response.status_code}")
                 
         except Exception as e:
-            print(f"Error fetching NSE breadth: {type(e).__name__} - {e}")
+            logger.error(f"Error fetching NSE breadth: {type(e).__name__} - {e}")
             
     # Agar fetch fail hota hai toh safe fallback value (Zero nahi bhejna chahiye taaki frontend draw ho sake)
     return {"advances": 1420, "declines": 850, "unchanged": 50}
