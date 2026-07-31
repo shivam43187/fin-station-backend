@@ -81,26 +81,42 @@ def sync_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 @router.get("/profile", response_model=schemas.UserResponse)
 def get_user_profile(
     email: str | None = Query(None),
-    phone_number: str | None = Query(None),
     db: Session = Depends(get_db),
     auth_payload: dict = Depends(verify_user_token)
 ):
-    if not email and not phone_number:
-        raise HTTPException(status_code=400, detail="Provide at least email or phone number to fetch user")
+    try:
+        token_email = auth_payload.get("email")
 
-    token_email = auth_payload.get("email")
-    if email and token_email and email != token_email:
-        raise HTTPException(status_code=403, detail="Access denied. You can only fetch your own profile.")
+        if not email:
+            raise HTTPException(
+                status_code=400,
+                detail="Email is required."
+            )
 
-    conditions = []
-    if email:
-        conditions.append(models.User.email == email)
-    if phone_number:
-        conditions.append(models.User.phone_number == phone_number)
+        if token_email and email != token_email:
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied. You can only fetch your own profile."
+            )
 
-    user = db.query(models.User).filter(or_(*conditions)).first()
+        user = (
+            db.query(models.User)
+            .filter(models.User.email == email)
+            .first()
+        )
 
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        if not user:
+            raise HTTPException(
+                status_code=404,
+                detail="User not found"
+            )
 
-    return user
+        return user
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
