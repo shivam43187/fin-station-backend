@@ -2,10 +2,13 @@ import httpx
 import asyncio
 import time
 import logging
+import json
 from fastapi import APIRouter, Depends, HTTPException, Query
 import os
 from dotenv import load_dotenv
 from ..auth import verify_user_token
+
+from app.redis import RedisCache
 
 load_dotenv()
 logger = logging.getLogger("screener")
@@ -13,6 +16,7 @@ router = APIRouter(prefix="/screener", tags=["Screener"])
 
 STOCK_API_BASE_URL = "https://stock.indianapi.in"
 API_KEY = os.getenv("INDIAN_API_KEY", "")
+UPSTASH_REDIS_REST_REVALIDATE_TIME = int(os.getenv("UPSTASH_REDIS_REST_REVALIDATE_TIME", "3600"))
 headers = {"X-Api-Key": str(API_KEY)}
 
 if not API_KEY:
@@ -137,44 +141,113 @@ async def fetch_stat(client: httpx.AsyncClient, symbol: str, stats: str):
 
 
 @router.get("/{symbol}")
-async def get_company_data(symbol: str, auth_payload: dict = Depends(verify_user_token)):
+async def get_company_data(
+    symbol: str,
+    stockName: str | None = Query(None),
+    auth_payload: dict = Depends(verify_user_token)
+):
     """
     Fetches full company details: Overview/Ratios (from /stock) plus
-    Profit & Loss, Balance Sheet, and Cash Flow (from /historical_stats).
+    Profit & Loss, Balance Sheet, and Cash Flow.
     """
+
+    symbol = symbol.upper()
+    cache_key = f"company:{symbol}"
+
+    # --------------------
+    # Check Redis Cache
+    # --------------------
+    cached_data = RedisCache.get(cache_key)
+    if cached_data:
+        logger.info(f"{symbol} served from Redis")
+        return json.loads(cached_data)
+
     try:
         async with httpx.AsyncClient() as client:
-            stock_task = client.get(f"{STOCK_API_BASE_URL}/stock", params={"name": symbol}, headers=headers, timeout=15.0)
+            stock_data = {}
 
-            # Quarterly P&L. Swap to "yoy_results" if you'd rather show yearly by default.
+            # 1. Try with symbol
+            stock_res = await client.get(
+                f"{STOCK_API_BASE_URL}/stock",
+                params={"name": symbol},
+                headers=headers,
+                timeout=15.0,
+            )
+
+            if stock_res.status_code == 200:
+                stock_data = stock_res.json()
+
+            # 2. If not found and company name is available, try again
+            if (not stock_data) and stockName:
+                logger.info(f"Retrying /stock with company name: {stockName}")
+
+                stock_res = await client.get(
+                    f"{STOCK_API_BASE_URL}/stock",
+                    params={"name": stockName},
+                    headers=headers,
+                    timeout=15.0,
+                )
+
+                if stock_res.status_code == 200:
+                    stock_data = stock_res.json()
+
             pl_task = fetch_stat(client, symbol, "quarter_results")
             bs_task = fetch_stat(client, symbol, "balancesheet")
             cf_task = fetch_stat(client, symbol, "cashflow")
 
-            stock_res, pl_data, bs_data, cf_data = await asyncio.gather(
-                stock_task, pl_task, bs_task, cf_task
+            pl_data, bs_data, cf_data = await asyncio.gather(
+                pl_task,
+                bs_task,
+                cf_task,
             )
-            logger.warning(f"/stock?name={symbol}")
+
             if stock_res.status_code != 200:
-                logger.warning(f"/stock?name={symbol} -> HTTP {stock_res.status_code}: {stock_res.text[:200]}")
+                logger.warning(
+                    f"/stock?name={symbol} -> HTTP {stock_res.status_code}: "
+                    f"{stock_res.text[:200]}"
+                )
 
-            stock_data = stock_res.json() if stock_res.status_code == 200 else {}
+            if (
+                not stock_data
+                and not pl_data
+                and not bs_data
+                and not cf_data
+            ):
+                raise HTTPException(
+                    status_code=404,
+                    detail="Company data not found. Check the symbol.",
+                )
 
-            if not stock_data and not pl_data and not bs_data and not cf_data:
-                raise HTTPException(status_code=404, detail="Company data not found. Check the symbol.")
-
-            return {
-                "symbol": symbol.upper(),
-                "overview": stock_data,   # Basic info, ratios, shareholding, price
+            response = {
+                "symbol": symbol,
+                "overview": stock_data,
                 "financials": {
                     "profit_loss": pl_data,
                     "balance_sheet": bs_data,
-                    "cash_flow": cf_data
-                }
+                    "cash_flow": cf_data,
+                },
             }
+
+            # --------------------
+            # Cache for 24 hours
+            # --------------------
+            # RedisCache.set(
+            #     cache_key,
+            #     response,
+            #     ex=UPSTASH_REDIS_REST_REVALIDATE_TIME,
+            # )
+
+            # logger.info(f"{symbol} cached in Redis")
+
+            return response
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Screener fetch failed for {symbol}: {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch company data")
+        logger.error(
+            f"Screener fetch failed for {symbol}: {type(e).__name__}: {e}"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to fetch company data",
+        )

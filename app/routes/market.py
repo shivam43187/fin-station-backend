@@ -2,12 +2,14 @@ import yfinance as yf
 import httpx
 import asyncio
 import logging
+import json
 from fastapi import APIRouter, Depends, HTTPException
 import os
 from dotenv import load_dotenv
 from curl_cffi import requests as cffi_requests
 
 from app.auth import verify_user_token
+from app.redis import RedisCache
 
 load_dotenv()
 logger = logging.getLogger("market")
@@ -16,6 +18,7 @@ logging.basicConfig(level=logging.INFO)
 router = APIRouter(prefix="/market", tags=["Market"])
 STOCK_API_BASE_URL = "https://stock.indianapi.in"
 API_KEY = os.getenv("INDIAN_API_KEY", "")
+UPSTASH_REDIS_REST_REVALIDATE_TIME = int(os.getenv("UPSTASH_REDIS_REST_REVALIDATE_TIME", "3600"))
 headers = {"X-Api-Key": str(API_KEY)}
 
 if not API_KEY:
@@ -67,8 +70,49 @@ def get_live_index(ticker_symbol: str):
         return {"price": 0.0, "change": 0.0, "pChange": 0.0}
 
 
+async def fetch_nse_market_breadth():
+    url = "https://www.nseindia.com/api/allIndices"
+    
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            # Session establish karne ke liye homepage hit karna zaroori hai
+            await client.get("https://www.nseindia.com", headers=headers, timeout=10.0)
+            
+            # API Hit
+            response = await client.get(url, headers=headers, timeout=10.0)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Direct root keys se nikal lijiye jo poore market ka total hai
+                return {
+                    "advances": data.get("advances", 0),
+                    "declines": data.get("declines", 0),
+                    "unchanged": data.get("unchanged", 0)
+                }
+            else:
+                print(f"NSE Breadth API returned {response.status_code}")
+                
+        except Exception as e:
+            print(f"Error fetching NSE breadth: {type(e).__name__} - {e}")
+            
+    # Agar fetch fail hota hai toh safe fallback value (Zero nahi bhejna chahiye taaki frontend draw ho sake)
+    return {"advances": 1420, "declines": 850, "unchanged": 50}
+
+
 @router.get("/dashboard")
 async def get_market_dashboard(auth_payload: dict = Depends(verify_user_token)):
+    cache_key = "market:dashboard"
+
+    # Check cache
+    cached_data = RedisCache.get(cache_key)
+    if cached_data:
+        logger.info("Dashboard served from Redis")
+        return json.loads(cached_data)
     try:
         # Indices from yfinance, run off the event loop since they're blocking calls
         nifty_task = asyncio.to_thread(get_live_index, "^NSEI")
@@ -77,9 +121,11 @@ async def get_market_dashboard(auth_payload: dict = Depends(verify_user_token)):
 
         async with httpx.AsyncClient() as client:
             trending_task = client.get(f"{STOCK_API_BASE_URL}/trending", headers=headers, timeout=10.0)
+            
+            breadth_task = asyncio.create_task(fetch_nse_market_breadth())
 
-            nifty, sensex, brent, trending_res = await asyncio.gather(
-                nifty_task, sensex_task, brent_task, trending_task
+            nifty, sensex, brent, breadth, trending_res = await asyncio.gather(
+                nifty_task, sensex_task, brent_task, breadth_task, trending_task
             )
 
             # GIFT Nifty isn't reliably on Yahoo either (it trades on NSE IX/Singapore).
@@ -112,10 +158,10 @@ async def get_market_dashboard(auth_payload: dict = Depends(verify_user_token)):
             except Exception as e:
                 logger.error(f"Failed to parse trending response: {type(e).__name__}: {e}")
 
-            advances = 1420 if nifty["change"] >= 0 else 850
-            declines = 2270 - advances
+            # advances = 1420 if nifty["change"] >= 0 else 850
+            # declines = 2270 - advances
 
-            return {
+            response = {
                 "indices": {
                     "Nifty 50": nifty,
                     "Sensex": sensex,
@@ -124,11 +170,12 @@ async def get_market_dashboard(auth_payload: dict = Depends(verify_user_token)):
                 },
                 "top_gainers": top_gainers,
                 "top_losers": top_losers,
-                "market_breadth": {
-                    "advances": advances,
-                    "declines": declines
-                }
+                "market_breadth": breadth
             }
+
+            RedisCache.set(cache_key, response, ex=UPSTASH_REDIS_REST_REVALIDATE_TIME)
+
+            return response
     except Exception as e:
         logger.error(f"Dashboard Crash: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail="Backend parsing error")
@@ -136,20 +183,36 @@ async def get_market_dashboard(auth_payload: dict = Depends(verify_user_token)):
 
 @router.get("/news")
 async def get_market_news(auth_payload: dict = Depends(verify_user_token)):
+    cache_key = "market:news"
+
+    cached_data = RedisCache.get(cache_key)
+    if cached_data:
+        logger.info("News served from Redis")
+        return json.loads(cached_data)
     try:
         async with httpx.AsyncClient() as client:
             res = await client.get(f"{STOCK_API_BASE_URL}/news", headers=headers, timeout=10.0)
+            news = []
+
             if res.status_code == 200:
                 data = res.json()
+
                 if isinstance(data, list):
-                    return data[:10]
-                if isinstance(data, dict):
-                    for k in ["data", "news", "articles", "results"]:
-                        if k in data and isinstance(data[k], list):
-                            return data[k][:10]
+                    news = data[:10]
+
+                elif isinstance(data, dict):
+                    for key in ["data", "news", "articles", "results"]:
+                        if key in data and isinstance(data[key], list):
+                            news = data[key][:10]
+                            break
             else:
-                logger.warning(f"/news -> HTTP {res.status_code}: {res.text[:200]}")
-            return []
+                logger.warning(
+                    f"/news -> HTTP {res.status_code}: {res.text[:200]}"
+                )
+
+            RedisCache.set(cache_key, news, ex=UPSTASH_REDIS_REST_REVALIDATE_TIME)
+
+            return news
     except Exception as e:
         logger.error(f"News fetch failed: {type(e).__name__}: {e}")
         return []
