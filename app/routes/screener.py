@@ -1,7 +1,8 @@
 import httpx
 import asyncio
+import time
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 import os
 from dotenv import load_dotenv
 from ..auth import verify_user_token
@@ -16,6 +17,105 @@ headers = {"X-Api-Key": str(API_KEY)}
 
 if not API_KEY:
     logger.warning("INDIAN_API_KEY is empty — screener calls will likely 401/403")
+
+# ─────────────────────────────────────────────────────────────
+# Autocomplete search — backed by a static, publicly-hosted list
+# of all NSE/BSE stocks (no API key required, so it's free/unlimited
+# to query, unlike the paid /stock and /historical_stats endpoints).
+# We cache it in-memory and refresh once a day so a per-keystroke
+# search never hits the network.
+# ─────────────────────────────────────────────────────────────
+ALL_STOCKS_URL = "https://dev.indianapi.in/static/all_stocks.json"
+_STOCKS_CACHE: list[dict] = []
+_STOCKS_CACHE_TS: float = 0.0
+_CACHE_TTL_SECONDS = 24 * 60 * 60  # 24 hours
+
+
+async def _get_all_stocks(client: httpx.AsyncClient) -> list[dict]:
+    global _STOCKS_CACHE, _STOCKS_CACHE_TS
+    now = time.time()
+
+    if _STOCKS_CACHE and (now - _STOCKS_CACHE_TS) < _CACHE_TTL_SECONDS:
+        return _STOCKS_CACHE
+
+    try:
+        res = await client.get(ALL_STOCKS_URL, timeout=15.0)
+        res.raise_for_status()
+        data = res.json()
+        if isinstance(data, list) and data:
+            _STOCKS_CACHE = data
+            _STOCKS_CACHE_TS = now
+            logger.info(f"Refreshed stock list cache: {len(data)} stocks")
+        return _STOCKS_CACHE
+    except Exception as e:
+        logger.error(f"Failed to refresh stock list, serving stale cache if any: {type(e).__name__}: {e}")
+        return _STOCKS_CACHE  # serve whatever we had before, even if stale
+
+
+def _query_symbol(stock: dict) -> str | None:
+    """
+    The value we tell the frontend to send back to /screener/{symbol}.
+    Prefer the NSE ticker (the underlying /stock API resolves these reliably).
+    If a stock has no NSE listing, DON'T fall back to the raw numeric BSE
+    code — /stock?name=<number> won't resolve to anything. Fall back to the
+    full company name instead, since that endpoint matches on name text.
+    """
+    nse = (stock.get("nse-code") or "").strip()
+    if nse and nse.lower() != "null":
+        return nse
+    name = (stock.get("name") or "").strip()
+    return name or None
+
+
+# IMPORTANT: this must be registered BEFORE the "/{symbol}" route below,
+# otherwise FastAPI will match "/screener/search" as symbol="search".
+@router.get("/search")
+async def search_stocks(
+    q: str = Query(..., min_length=1, description="Partial company name or ticker symbol"),
+    auth_payload: dict = Depends(verify_user_token),
+):
+    """
+    Autocomplete search over the full NSE/BSE stock universe.
+    Returns up to 8 matches, name-prefix and symbol-prefix matches ranked
+    above plain substring matches.
+    """
+    query = q.strip().lower()
+    if not query:
+        return []
+
+    async with httpx.AsyncClient() as client:
+        stocks = await _get_all_stocks(client)
+
+    starts_with: list[dict] = []
+    contains: list[dict] = []
+
+    for stock in stocks:
+        symbol = _query_symbol(stock)
+        if not symbol:
+            continue
+
+        name = (stock.get("name") or "")
+        name_lower = name.lower()
+        symbol_lower = symbol.lower()
+
+        if name_lower.startswith(query) or symbol_lower.startswith(query):
+            starts_with.append(stock)
+        elif query in name_lower or query in symbol_lower:
+            contains.append(stock)
+
+        if len(starts_with) >= 8:
+            break
+
+    results = (starts_with + contains)[:8]
+
+    return [
+        {
+            "name": s.get("name"),
+            "symbol": _query_symbol(s),
+            "bse_code": s.get("bse-code"),
+        }
+        for s in results
+    ]
 
 
 async def fetch_stat(client: httpx.AsyncClient, symbol: str, stats: str):
@@ -54,7 +154,7 @@ async def get_company_data(symbol: str, auth_payload: dict = Depends(verify_user
             stock_res, pl_data, bs_data, cf_data = await asyncio.gather(
                 stock_task, pl_task, bs_task, cf_task
             )
-
+            logger.warning(f"/stock?name={symbol}")
             if stock_res.status_code != 200:
                 logger.warning(f"/stock?name={symbol} -> HTTP {stock_res.status_code}: {stock_res.text[:200]}")
 
