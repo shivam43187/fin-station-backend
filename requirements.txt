@@ -10,3 +10,4 @@ anthropic
 razorpay
 psycopg2-binary
 pydantic[email]
+jwt
