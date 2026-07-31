@@ -231,13 +231,13 @@ async def get_company_data(
             # --------------------
             # Cache for 24 hours
             # --------------------
-            # RedisCache.set(
-            #     cache_key,
-            #     response,
-            #     ex=UPSTASH_REDIS_REST_REVALIDATE_TIME,
-            # )
+            RedisCache.set(
+                cache_key,
+                response,
+                ex=UPSTASH_REDIS_REST_REVALIDATE_TIME,
+            )
 
-            # logger.info(f"{symbol} cached in Redis")
+            logger.info(f"{symbol} cached in Redis")
 
             return response
 
