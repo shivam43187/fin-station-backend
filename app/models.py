@@ -26,7 +26,7 @@ class User(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
-    phone_number = Column(String, unique=True, nullable=True)
+    phone_number = Column(String, nullable=True)
     full_name = Column(String)
     auth_provider = Column(String, default="email")
     created_at = Column(DateTime(timezone=True), server_default=func.now())

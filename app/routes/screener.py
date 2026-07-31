@@ -1,9 +1,10 @@
 import httpx
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 import os
 from dotenv import load_dotenv
+from ..auth import verify_user_token
 
 load_dotenv()
 logger = logging.getLogger("screener")
@@ -36,7 +37,7 @@ async def fetch_stat(client: httpx.AsyncClient, symbol: str, stats: str):
 
 
 @router.get("/{symbol}")
-async def get_company_data(symbol: str):
+async def get_company_data(symbol: str, auth_payload: dict = Depends(verify_user_token)):
     """
     Fetches full company details: Overview/Ratios (from /stock) plus
     Profit & Loss, Balance Sheet, and Cash Flow (from /historical_stats).

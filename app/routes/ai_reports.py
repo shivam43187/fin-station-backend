@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from anthropic import AsyncAnthropic
 
+from app.auth import verify_user_token
+
 from .. import models, schemas
 from ..database import get_db
 
@@ -50,7 +52,8 @@ async def generate_report(
     user_id: str = Query(..., description="UUID of the requesting user"), 
     report_type: str = Query("standard"), 
     custom_prompt: str = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    auth_payload: dict = Depends(verify_user_token)
 ):
     symbol = symbol.upper()
     logger.info(f"[{symbol}] Report request received | User: {user_id} | Type: {report_type}")

@@ -2,10 +2,12 @@ import yfinance as yf
 import httpx
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 import os
 from dotenv import load_dotenv
 from curl_cffi import requests as cffi_requests
+
+from app.auth import verify_user_token
 
 load_dotenv()
 logger = logging.getLogger("market")
@@ -66,7 +68,7 @@ def get_live_index(ticker_symbol: str):
 
 
 @router.get("/dashboard")
-async def get_market_dashboard():
+async def get_market_dashboard(auth_payload: dict = Depends(verify_user_token)):
     try:
         # Indices from yfinance, run off the event loop since they're blocking calls
         nifty_task = asyncio.to_thread(get_live_index, "^NSEI")
@@ -133,7 +135,7 @@ async def get_market_dashboard():
 
 
 @router.get("/news")
-async def get_market_news():
+async def get_market_news(auth_payload: dict = Depends(verify_user_token)):
     try:
         async with httpx.AsyncClient() as client:
             res = await client.get(f"{STOCK_API_BASE_URL}/news", headers=headers, timeout=10.0)

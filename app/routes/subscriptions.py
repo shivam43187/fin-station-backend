@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 
 import razorpay
 
+from app.auth import verify_user_token
+
 from .. import models, schemas
 from ..database import get_db
 
@@ -41,7 +43,7 @@ FREE_PLAN_REPORT_LIMIT = 2
 #    auto-renewal, since it registers a recurring mandate with the customer)
 # ---------------------------------------------------------------------------
 @router.post("/create-order")
-def create_subscription_order(user_id: UUID, plan_type: str, db: Session = Depends(get_db)):
+def create_subscription_order(user_id: UUID, plan_type: str, db: Session = Depends(get_db), auth_payload: dict = Depends(verify_user_token)):
     if plan_type not in PLAN_CONFIG:
         raise HTTPException(status_code=400, detail="Invalid Plan Type")
 
@@ -82,7 +84,7 @@ def create_subscription_order(user_id: UUID, plan_type: str, db: Session = Depen
 # 2. WEBHOOK
 # ---------------------------------------------------------------------------
 @router.post("/webhook")
-async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
+async def razorpay_webhook(request: Request, db: Session = Depends(get_db), auth_payload: dict = Depends(verify_user_token)):
     payload = await request.body()
     razorpay_signature = request.headers.get("x-razorpay-signature")
     webhook_secret = os.getenv("RAZORPAY_WEBHOOK_SECRET")
@@ -188,7 +190,8 @@ FREE_PLAN_RESPONSE = {
 def get_my_subscription(
     email: str | None = None,
     phone_number: str | None = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    auth_payload: dict = Depends(verify_user_token)
 ):
     if not email and not phone_number:
         raise HTTPException(status_code=400, detail="Provide at least email or phone number")

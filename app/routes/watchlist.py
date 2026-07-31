@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
+from app.auth import verify_user_token
+
 from .. import models
 from ..database import get_db
 
@@ -51,7 +53,7 @@ async def fetch_live_price(client: httpx.AsyncClient, symbol: str):
     return {"symbol": symbol, "price": 0.0, "change": 0.0, "pChange": 0.0}
 
 @router.get("/{user_id}")
-async def get_watchlist(user_id: str, db: Session = Depends(get_db)):
+async def get_watchlist(user_id: str, db: Session = Depends(get_db), auth_payload: dict = Depends(verify_user_token)):
     try:
         uid = UUID(user_id)
     except ValueError:
@@ -69,7 +71,7 @@ async def get_watchlist(user_id: str, db: Session = Depends(get_db)):
     return live_data
 
 @router.post("/")
-def add_to_watchlist(req: WatchlistAdd, db: Session = Depends(get_db)):
+def add_to_watchlist(req: WatchlistAdd, db: Session = Depends(get_db), auth_payload: dict = Depends(verify_user_token)):
     req.stock_symbol = req.stock_symbol.upper().strip()
     try:
         uid = UUID(req.user_id)
@@ -98,7 +100,7 @@ def add_to_watchlist(req: WatchlistAdd, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 @router.delete("/{user_id}/{symbol}")
-def remove_from_watchlist(user_id: str, symbol: str, db: Session = Depends(get_db)):
+def remove_from_watchlist(user_id: str, symbol: str, db: Session = Depends(get_db), auth_payload: dict = Depends(verify_user_token)):
     try:
         uid = UUID(user_id)
     except ValueError:
